@@ -16,45 +16,52 @@ import gym
 import logging
 import pandas as pd
 import numpy as np
+import tensortrade.exchanges as exchanges
+import tensortrade.actions as actions
+import tensortrade.rewards as rewards
+import tensortrade.features as features
 
 from gym import spaces
 from typing import Union, Tuple, List
 
 from tensortrade.actions import ActionStrategy, TradeActionUnion
-from tensortrade.features import FeaturePipeline
 from tensortrade.rewards import RewardStrategy
 from tensortrade.exchanges import InstrumentExchange
+from tensortrade.features import FeaturePipeline
 from tensortrade.trades import Trade
-
-TensorForceStateType = Union[bool, int, float]
-TensorForceStateShape = Union[int, List[int], Tuple[int, ...]]
-TensorForceMinMaxValue = Union[int, float]
 
 
 class TradingEnvironment(gym.Env):
     """A trading environment made for use with Gym-compatible reinforcement learning algorithms."""
 
     def __init__(self,
-                 exchange: InstrumentExchange,
-                 action_strategy: ActionStrategy,
-                 reward_strategy: RewardStrategy,
-                 feature_pipeline: FeaturePipeline = None,
+                 exchange: Union[InstrumentExchange, str],
+                 action_strategy: Union[ActionStrategy, str],
+                 reward_strategy: Union[RewardStrategy, str],
+                 feature_pipeline: Union[FeaturePipeline, str] = None,
                  **kwargs):
         """
         Arguments:
             exchange: The `InstrumentExchange` that will be used to feed data from and execute trades within.
-            feature_pipeline: A `FeaturePipeline` instance of feature transformations.
             action_strategy:  The strategy for transforming an action into a `Trade` at each timestep.
             reward_strategy: The strategy for determining the reward at each timestep.
+            feature_pipeline (optional): The pipeline of features to pass the observations through.
             kwargs (optional): Additional arguments for tuning the environment, logging, etc.
         """
-
         super().__init__()
 
-        self._exchange = exchange
-        self._action_strategy = action_strategy
-        self._reward_strategy = reward_strategy
-        self._feature_pipeline = feature_pipeline
+        self._exchange = exchanges.get(exchange) if isinstance(exchange, str) else exchange
+        self._action_strategy = actions.get(action_strategy) if isinstance(
+            action_strategy, str) else action_strategy
+        self._reward_strategy = rewards.get(reward_strategy) if isinstance(
+            reward_strategy, str) else reward_strategy
+        self._feature_pipeline = features.get(feature_pipeline) if isinstance(
+            feature_pipeline, str) else feature_pipeline
+
+        if feature_pipeline is not None:
+            self._exchange.feature_pipeline = feature_pipeline
+
+        self._exchange.reset()
 
         self._action_strategy.exchange = self._exchange
         self._reward_strategy.exchange = self._exchange
@@ -77,15 +84,6 @@ class TradingEnvironment(gym.Env):
         self._exchange = exchange
 
     @property
-    def feature_pipeline(self) -> FeaturePipeline:
-        """A pipeline of feature transformations to be applied to observations from the environment."""
-        return self._feature_pipeline
-
-    @feature_pipeline.setter
-    def feature_pipeline(self, feature_pipeline: FeaturePipeline):
-        self._feature_pipeline = feature_pipeline
-
-    @property
     def action_strategy(self) -> ActionStrategy:
         """The strategy for transforming an action into a `Trade` at each timestep."""
         return self._action_strategy
@@ -96,7 +94,7 @@ class TradingEnvironment(gym.Env):
 
     @property
     def reward_strategy(self) -> RewardStrategy:
-        """The strategy for determining the reward at each timestep"""
+        """The strategy for determining the reward at each timestep."""
         return self._reward_strategy
 
     @reward_strategy.setter
@@ -104,29 +102,13 @@ class TradingEnvironment(gym.Env):
         self._reward_strategy = reward_strategy
 
     @property
-    def states(self) -> Tuple[TensorForceStateType, TensorForceStateShape]:
-        """The state space specification, required for `tensorforce` agents.
+    def feature_pipeline(self) -> FeaturePipeline:
+        """The feature pipeline to pass the observations through."""
+        return self._exchange.feature_pipeline
 
-        The tuple contains the following attributes:
-            - type: Either 'bool', 'int', or 'float'.
-            - shape: The shape of the space. An `int` or `list`/`tuple` of `int`s.
-        """
-        from tensorforce.contrib.openai_gym import OpenAIGym
-        return OpenAIGym.state_from_space(self.observation_space)
-
-    @property
-    def actions(self) -> Tuple[TensorForceStateType, TensorForceStateShape, int, TensorForceMinMaxValue, TensorForceMinMaxValue]:
-        """The action space specification, required for `tensorforce` agents.
-
-        The tuple contains the following attributes:
-            - type: Either 'bool', 'int', or 'float'.
-            - shape: The shape of the space. An `int` or `list`/`tuple` of `int`s.
-            - num_actions (required if type == 'int'): The number of discrete actions.
-            - min_value (optional if type == 'float'): An `int` or `float`. Defaults to `None`.
-            - max_value (optional if type == 'float'): An `int` or `float`. Defaults to `None`.
-        """
-        from tensorforce.contrib.openai_gym import OpenAIGym
-        return OpenAIGym.action_from_space(self.action_space)
+    @feature_pipeline.setter
+    def feature_pipeline(self, feature_pipeline: FeaturePipeline):
+        self._exchange.feature_pipeline = feature_pipeline
 
     def _take_action(self, action: TradeActionUnion) -> Trade:
         """Determines a specific trade to be taken and executes it within the exchange.
@@ -143,7 +125,7 @@ class TradingEnvironment(gym.Env):
 
         return executed_trade, filled_trade
 
-    def _next_observation(self, trade: Trade) -> pd.DataFrame:
+    def _next_observation(self, trade: Trade) -> np.ndarray:
         """Returns the next observation from the exchange.
 
         Returns:
@@ -152,11 +134,9 @@ class TradingEnvironment(gym.Env):
         self._current_step += 1
 
         observation = self._exchange.next_observation()
-        observation = observation.fillna(0, axis=0)
-
-        if self._feature_pipeline is not None:
-            observation = self._feature_pipeline.fit_transform(observation)
-
+        if len(observation) != 0:
+            observation = observation[0]
+            observation = np.nan_to_num(observation)
         return observation
 
     def _get_reward(self, trade: Trade) -> float:
@@ -165,10 +145,10 @@ class TradingEnvironment(gym.Env):
         Returns:
             A float corresponding to the benefit earned by the action taken this step.
         """
-        reward: float = self._reward_strategy.get_reward(
-            current_step=self._current_step, trade=trade)
+        reward = self._reward_strategy.get_reward(current_step=self._current_step, trade=trade)
+        reward = np.nan_to_num(reward)
 
-        if not np.isfinite(reward):
+        if np.bitwise_not(np.isfinite(reward)):
             raise ValueError('Reward returned by the reward strategy must by a finite float.')
 
         return reward
@@ -201,12 +181,11 @@ class TradingEnvironment(gym.Env):
             action: The trade action provided by the agent for this timestep.
 
         Returns:
-            observation (pandas.DataFrame): Provided by the environment's exchange, often OHLCV or tick trade history data points.\n
-            reward (float): An amount corresponding to the benefit earned by the action taken this timestep.\n
-            done (bool): If `True`, the environment is complete and should be restarted.\n
+            observation (pandas.DataFrame): Provided by the environment's exchange, often OHLCV or tick trade history data points.
+            reward (float): An amount corresponding to the benefit earned by the action taken this timestep.
+            done (bool): If `True`, the environment is complete and should be restarted.
             info (dict): Any auxiliary, diagnostic, or debugging information to output.
         """
-
         executed_trade, filled_trade = self._take_action(action)
 
         observation = self._next_observation(filled_trade)
@@ -216,27 +195,12 @@ class TradingEnvironment(gym.Env):
 
         return observation, reward, done, info
 
-    def execute(self, action) -> Tuple[pd.DataFrame, float, bool, dict]:
-        """Run one timestep within the environment based on the specified action, required for `tensorforce` agents.
-
-        Arguments:
-            action: The trade action provided by the agent for this timestep.
-
-        Returns:
-            observation (np.ndarray): Provided by the environment's exchange, often OHLCV or tick trade history data points.\n
-            done (bool): If `True`, the environment is complete and should be restarted.\n
-            reward (float): An amount corresponding to the benefit earned by the action taken this timestep.\n
-        """
-        observation, done, reward, _ = self.step(action)
-        return observation.values, reward, done
-
     def reset(self) -> pd.DataFrame:
         """Resets the state of the environment and returns an initial observation.
 
         Returns:
             observation: the initial observation.
         """
-
         self._action_strategy.reset()
         self._reward_strategy.reset()
         self._exchange.reset()

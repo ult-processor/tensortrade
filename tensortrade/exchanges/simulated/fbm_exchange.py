@@ -22,7 +22,7 @@ from stochastic.continuous import FractionalBrownianMotion
 from stochastic.noise import GaussianNoise
 
 from tensortrade.trades import TradeType, Trade
-from tensortrade.slippage import RandomSlippageModel
+from tensortrade.slippage import RandomUniformSlippageModel
 from tensortrade.exchanges.simulated.simulated_exchange import SimulatedExchange
 
 
@@ -43,8 +43,11 @@ class FBMExchange(SimulatedExchange):
         self._timeframe = kwargs.get('timeframe', '1h')
 
     def _generate_price_history(self):
-        price_fbm = FractionalBrownianMotion(t=self._times_to_generate, hurst=self._hurst)
-        volume_gen = GaussianNoise(t=self._times_to_generate)
+        try:
+            price_fbm = FractionalBrownianMotion(t=self._times_to_generate, hurst=self._hurst)
+            volume_gen = GaussianNoise(t=self._times_to_generate)
+        except:
+            self._generate_price_history()
 
         start_date = pd.to_datetime(self._start_date, format=self._start_date_format)
 
@@ -70,9 +73,10 @@ class FBMExchange(SimulatedExchange):
         volume_frame.set_index('date')
         volume_frame.index = pd.to_datetime(volume_frame.index, unit='m', origin=start_date)
 
-        self._data_frame = price_frame['price'].resample(self._timeframe).ohlc()
-        self._data_frame['volume'] = volume_frame['volume'].resample(self._timeframe).sum()
-        self._data_frame = self._data_frame.astype(self._dtype)
+        data_frame = price_frame['price'].resample(self._timeframe).ohlc()
+        data_frame['volume'] = volume_frame['volume'].resample(self._timeframe).sum()
+
+        self.data_frame = data_frame.astype(self._dtype)
 
     def reset(self):
         super().reset()

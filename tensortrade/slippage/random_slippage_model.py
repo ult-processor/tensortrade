@@ -18,8 +18,8 @@ from tensortrade.slippage import SlippageModel
 from tensortrade.trades import Trade, TradeType
 
 
-class RandomSlippageModel(SlippageModel):
-    "A uniform random slippage model."
+class RandomUniformSlippageModel(SlippageModel):
+    """A uniform random slippage model."""
 
     def __init__(self, max_price_slippage_percent: float = 3.0, max_amount_slippage_percent: float = 0.0):
         """
@@ -40,7 +40,7 @@ class RandomSlippageModel(SlippageModel):
         if trade.trade_type is TradeType.MARKET_BUY:
             fill_price = current_price * (1 + price_slippage)
         elif trade.trade_type is TradeType.LIMIT_BUY:
-            fill_price = current_price * (1 + price_slippage)
+            fill_price = max(current_price * (1 + price_slippage), 1e-3)
 
             if fill_price > trade.price:
                 fill_price = trade.price
@@ -49,7 +49,7 @@ class RandomSlippageModel(SlippageModel):
         elif trade.trade_type is TradeType.MARKET_SELL:
             fill_price = current_price * (1 - price_slippage)
         elif trade.trade_type is TradeType.LIMIT_SELL:
-            fill_price = current_price * (1 - price_slippage)
+            fill_price = max(current_price * (1 - price_slippage), 1e-3)
 
             if fill_price < trade.price:
                 fill_price = trade.price

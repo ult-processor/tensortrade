@@ -1,25 +1,8 @@
 GPU_IMAGE?="tensortrade:latest-gpu"
 CPU_IMAGE?="tensortrade:latest"
 
-.PHONY: yapf lint clean sync lock test test-parallel docs-build docs-clean circle build-cpu build-gpu release
-
-yapf:
-	yapf -vv -ir .
-	isort -y
-
-lint:
-	flake8 .
-	pydocstyle .
-	mypy .
-
 clean:
 	find . | grep -E '(__pycache__|\.pyc|\.pyo$$)' | xargs rm -rf
-
-sync:
-	pipenv sync --dev
-
-lock:
-	pipenv lock --dev 
 
 test:
 	pytest tests/
@@ -38,11 +21,9 @@ docs-clean:
 	rm -rf docs/source/api
 
 docs-serve:
-	$(SHELL) -c "cd docs/_build/html; python -m http.server 8000"
-
-circle:
-	circleci config validate
-	circleci local execute --job build
+	$(SHELL) -C cd docs/build/html
+	python3 -m webbrowser http://localhost:8000/docs/build/html/index.html
+	python3 -m http.server 8000
 
 build-cpu: 
 	docker build -t ${CPU_IMAGE} .
@@ -50,9 +31,38 @@ build-cpu:
 build-gpu:
 	docker build -t ${GPU_IMAGE} . --build-arg gpu_tag="-gpu"
 
+build-cpu-if-not-built: 
+	if [ ! $$(docker images -q ${CPU_IMAGE}) ]; then $(MAKE) build-cpu; fi;
+
+build-gpu-if-not-built: 
+	if [ ! $$(docker images -q ${GPU_IMAGE}) ]; then $(MAKE) build-gpu; fi;
+
+run-notebook: build-cpu-if-not-built
+	docker run -it --rm -p=8888:8888 ${CPU_IMAGE} jupyter notebook --ip='*' --port=8888 --no-browser --allow-root ./examples/
+
+run-docs: build-cpu-if-not-built
+	if [ $$(docker ps -aq --filter name=tensortrade_docs) ]; then docker rm $$(docker ps -aq --filter name=tensortrade_docs); fi;
+	docker run -t --name tensortrade_docs ${CPU_IMAGE} make docs-build && make docs-serve
+	python3 -m webbrowser http://localhost:8000/docs/build/html/index.html
+
+run-tests: build-cpu-if-not-built
+	docker run -it --rm ${CPU_IMAGE} make test
+
+run-notebook-gpu: build-gpu-if-not-built
+	docker run -it --rm -p=8888:8888 ${GPU_IMAGE} jupyter notebook --ip='*' --port=8888 --no-browser --allow-root /examples/
+
+run-docs-gpu: build-gpu-if-not-built
+	if [ $$(docker ps -aq --filter name=tensortrade_docs) ]; then docker rm $$(docker ps -aq --filter name=tensortrade_docs); fi;
+	docker run -t --name tensortrade_docs ${GPU_IMAGE} make docs-build && make docs-serve
+	python3 -m webbrowser http://localhost:8000/docs/build/html/index.html
+
+run-tests-gpu: build-gpu-if-not-built
+	docker run -it --rm ${GPU_IMAGE} make test
+
 package:
-	python setup.py sdist
-	python setup.py bdist_wheel
+	rm -rf dist
+	python3 setup.py sdist
+	python3 setup.py bdist_wheel
 
 test-release: package
 	twine upload --repository-url https://test.pypi.org/legacy/ dist/*
