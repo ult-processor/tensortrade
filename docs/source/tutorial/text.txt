@@ -1,0 +1,1 @@
+the folowing is the liust of steps we are going to take in other to develop a fully functional bitcoin trading bot.

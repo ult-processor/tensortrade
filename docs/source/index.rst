@@ -41,6 +41,11 @@
 
 .. toctree::
    :maxdepth: 1
+   :caption: Tutorial
+   tutorial/Bitcoin_trading_With_tensorforce.md
+
+.. toctree::
+   :maxdepth: 1
    :caption: API reference
 
    API reference <api/modules>

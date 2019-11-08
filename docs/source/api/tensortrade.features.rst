@@ -11,9 +11,9 @@ Subpackages
 
 .. toctree::
 
-   tensortrade.features.indicators
    tensortrade.features.scalers
    tensortrade.features.stationarity
+   tensortrade.features.utils
 
 Submodules
 ----------
@@ -21,4 +21,4 @@ Submodules
 .. toctree::
 
    tensortrade.features.feature_pipeline
-   tensortrade.features.feature_transformer
+   tensortrade.features.transformer
